@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 'Db'는 키/값 데이터와, 활동중인 pub/sub 체널에 대한 모든 'broadcast::Sender' 값들을 'HashMap'에 저장한다.
 
-한 'Db' 인스턴스는 공유 상태에 대한 handle이다. 'Db'의 cloning은 shallow이며, atomic 레퍼런스 카운드를 증가시키기만 한다.
+한 'Db' 인스턴스는 공유 상태에 대한 핸들이다. 'Db'의 cloning은 shallow이며, atomic 레퍼런스 카운드를 증가시키기만 한다.
 
 'Db' 값이 하나 생성되면 백그라운드 작업 하나가 시작된다. 이 작업은 요청된 만료 시간이 도래했을 때 값을 expiring 한다.
 작업은 모든 'Db' 인스턴스의 dropped 까지 계속된다.
@@ -55,7 +55,7 @@ struct State {
     /*
     키 TTL을 추적한다.
 
-    키 만료 시, 만료 정보를 졍렬하여 보관하기 위해 'BTreeMap'을 사용한다.
+    키 만료 정보를 졍렬하여 보관하기 위해 'BTreeMap'을 사용한다.
     때문에 백그라운드 작업이 다음 만료 값을 찾을 때, 이 맵을 iterate하기만 하면 된다.
 
     가능성은 거의 없지만, 정확히 같은 순간에 둘 이상의 만료값이 생성될 수 있다.
@@ -111,7 +111,7 @@ impl Db {
     키에 해당하는 값을 꺼낸다.
 
     해당하는 값이 없으면 None을 반환한다. None을 반환하는 경우는 키에 대한 값이 할당되지 않았거나,
-    할당되었던 값이 만료된 경우가 있을 수 있다.
+    할당되었던 값이 만료된 경우이다.
     */
     pub(crate) fn get(&self, key: &str) -> Option<Bytes> {
         /*
@@ -145,16 +145,24 @@ impl Db {
         */
         let mut notify = false;
         let expires_at = expire.map(|duration| {
+            // 새로운 값이 만료될 시간.
             let when = Instant::now() + duration;
 
-            notify = state.next_expiration()
-                        .map(|expiration| expiration > when)
-                        .unwrap_or(true);
+            /*
+            오직 새로운 입력 항목의 만료가 다음 만료 항목일 때만 백그라운드 워커(태스크)에게 알린다.
+            이 경우, 워커는 깨어나서(woken up) 이 상태를 업데이트해야한다.
+            */
+            notify = state
+                .next_expiration()
+                .map(|expiration| expiration > when)
+                .unwrap_or(true);
             
+            // 만료를 추적한다.
             state.expirations.insert((when, id), key.clone());
             when
         });
 
+        // 새 항목을 'HashMap'에 넣는다.
         let prev = state.entries.insert(
             key,
             Entry {
@@ -164,28 +172,57 @@ impl Db {
             }
         );
 
+        /*
+        이 키로 저장된 기존 항목에 만료 시간이 있을 경우, 이 만료 정보는 삭제되어야 한다.
+        */
         if let some(prev) = prev {
             if let Some(when) = prev.expires_at {
                 state.expirations.remove(&(when, prev.id));
             }
         }
 
+        /*
+        백그라운드 태스크에게 알리기 전에 뮤택스를 해제한다. 이 작업은 이 함수가 뮤택스를 아직 잡고 있는 동안
+        백그라운드 태스크가 깨어나서 뮤택스를 획득하려는 불필요한 시도를 방지하여 경합을 줄이도록 한다.
+        */
         drop(state);
 
         if notify {
+            /*
+            마지막으로, 새로운 만료 정보를 업데이트해야 하는 경우에 한하여 백그라운드 태스크에게 알림을 보낸다.
+            */
             self.shared.background_task.notify_one();
         }
     }
 
+    /*
+    요청된 채널에 대한 'Receiver'를 반환한다.
 
+    반환되는 'Receiver'는 'PUBLISH' 커맨드로 값을 수신하는 경우에 사용된다.
+    */
     pub(crate) fn subscribe(&self, key: String) -> broadcast::Receiver<Bytes> {
         use std::collections::hash_map::Entry;
 
+        // 뮤택스를 획득한다.
         let mut state = self.shared.state.lock().unwrap();
 
+        /*
+        요청된 채널에 대한 앤트리가 없을 경우, 새로운 브로드캐스트 채널을 생성하여 키와 연결한다.
+        앤트리가 있다면 연결된 리시버를 반환한다.
+        */
         match state.pub_sub.entry(key) {
             Entry::Occupied(e) => e.get().subscribe(),
             Entry::Vacant(e) => {
+                /*
+                브로드캐스트가 없으면 새로 만든다.
+
+                채널은 '1024'개의 메시지를 담을 수 있도록 생성한다.
+                한 메시지는 모든 수신자들에게 전송될 때까지 보유된다. 
+                이는 한 구독자의 수신 속도가 늦는다면 메시지가 사라지지 않고 계속 남아있을 수 있음을 의미한다.
+
+                채널이 가득차면 메시지 발행은 오래된 메시지를 우선으로 drop한다. 
+                이렇게 함으로써 느린 메시지 수신자로 인해 전체 시스템이 정지되는 경우를 방지한다.
+                */
                 let (tx, rx) = broadcast::channel(1024);
                 e.insert(tx);
                 rx
@@ -193,23 +230,48 @@ impl Db {
         }
     }
 
+    /*
+    채널에 메시지를 발행하고, 채널의 수신자의 수를 반환한다.
+    */
     pub(crate) fn publish(&self, key: &str, value: Bytes) -> usize {
         let state = self.shared.state.lock().unwrap();
 
         state
             .pub_sub
             .get(key)
+            /*
+            브로드캐스트 채널을 통한 메시지 전송이 성공하면 수신자의 수를 반환한다.
+            에러는 수신자가 없음을 의미한다. 이 경우 '0'을 반환해야 한다.
+            */
             .map(|tx| tx.send(value).unwrap_or(0))
+            /*
+            키에 연결된 채널이 없다면 이는 수신자가 없는 것이다. 따라서 '0'을 반환한다.
+            */
             .unwrap_or(0)
     }
 }
 
 impl Drop for Db {
     fn drop(&mut self) {
+        /*
+        마지막 'Db' 인스턴스인 경우 백그라운드 태스크는 반드시 셧다운 시그널을 받아야 한다.
+
+        먼저, 이 인스턴스가 마지막 'Db' 인스턴스인지 판단한다. 이 판단은 'strong_count'를 확인함으로써 이루어진다.
+        마지막 인스턴스인 경우, 카운트는 2가 되어야 한다. 하나는 이 'Db' 인스턴스이고, 다른 하나는 백그라운드 태스크가 잡고있는
+        핸들이다.
+        */
         if Arc::strong_count(&self.shared) == 2 {
+            /*
+            백그라운드 태스크는 반드시 셧다운 시그널을 받아야 한다.
+            'State::shutdown'을 true로 세팅하고 태스크에게 시그널을 보낸다.
+            */
             let mut state = self.shared.state.lock().unwrap();
             state.shutdown = true;
 
+            /*
+            백그라운드 태스크에게 시그널을 보내기 전에 락을 drop한다.
+            이 작업은 불필요하게 백그라운드 태스크가 깨어나 뮤택스 획득을 시도하지 않도록 하여 락 경합을 줄인다.
+            */
             drop(state);
             self.shared.background_task.notify_one();
         }
@@ -217,27 +279,51 @@ impl Drop for Db {
 }
 
 impl Shared {
+    /*
+    모든 만료된 키를 퍼지하고, 다음 키 만료 시간을 가리키는 'Instant'를 반환한다.
+    */
     fn purge_expired_keys(&self) -> Option<Instant> {
         let mut state = self.state.lock().unwrap();
 
         if state.shutdown {
+            /*
+            데이터베이스는 셧다운되고, 공유 상태에 대한 모든 핸들은 drop되었다.
+            백그라운드 태스크는 정지되어야 한다.
+            */
             return None;
         }
 
+        /*
+        이 코드는 borrow checker를 만족시키기 위한 것이다. 간단히 말하자면, 'lock()'은 'MutexGuard'를 반환한다.
+        '&mut State'를 반환하지 않는다. borrow checker는 뮤택스 가드를 뚫고 안의 값을 볼 수 없어, 'state.expirations'와 'state.entries'에
+        mutably하게 접근하는 일이 안전한지 판단할 수 없다. 때문에 루프 밖에서 'State'에 대한 "진짜" mutable 레퍼런스를 얻도록 한다.
+        */
         let state = &mut *state;
 
+        // '지금' 전에 만료되도록 스케쥴된 모든 키를 찾는다.
         let now = Instant::now();
-
+        
         while let Some((&(when, id), key)) = state.expirations.iter().next() {
             if when > now {
+                /*
+                퍼지를 마치면 'when'은 다음 키 만료 시간을 가리키는 Instant가 된다.
+                백그라운드 태스크는 이 시간까지 대기할 것이다.
+                */
                 return Some(when);
             }
+
+            // 만료된 키는 삭제한다.
             state.entries.remove(key);
             state.expirations.remove(&(when, id));
         }
         None
     }
 
+    /*
+    데이터베이크가 셧다운 중이라면 'true'를 반환한다.
+
+    'shutdown'플래그는 'Db'의 모든 값이 drop되었을 때 설정된다. 이는 공유 상태에 더이상 접근할 수 없음을 나타낸다.
+    */
     fn is_shutdown(&self) -> bool {
         self.state.lock().unwrap().shutdown
     }
