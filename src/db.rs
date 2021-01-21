@@ -338,14 +338,33 @@ impl State {
     }
 }
 
+/*
+백그라운드 태스크의 실행 루틴.
+
+알림을 기다린다. 알림이 오면 공유 상태 핸들로부터 모든 만료 키를 퍼지한다.
+'shutdown'이 설정되면 태스크를 종료한다.
+*/
 async fn purge_expired_tasks(shared: Arc<Shared>) {
+    // 셧다운 플래그가 설정되면 태스크는 종료되어야 한다.
     while !shared.is_shutdown() {
+        /*
+        만료된 모든 키를 퍼지한다. 이 함수는 다음 만료될 키의 만료 시간을 반환한다.
+        워커는 다음 만료 시간이 지나 다시 퍼지를 수행할 때까지 기다려야 한다.
+        */
         if let Some(when) = shared.purge_expired_keys() {
+            /*
+            다음 키가 만료되거나, 백그라운드 태스크가 알림을 받을 때까지 기다린다.
+            알림을 받으면 반드시 상태를 리로드하여 더 빨리 만료되도록 설정된 새로운 키를 인식해야 한다.
+            이 작업은 루프를 통해 수행한다.
+            */
             tokio::select! {
                 _ = time::sleep_until(when) => {}
                 _ = shared.background_task.notified() => {}
             }
         } else {
+            /*
+            만료될 키가 없다. 알림을 기다린다.
+            */
             shared.background_task.notified().await;
         }
     }
