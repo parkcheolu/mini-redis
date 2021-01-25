@@ -1,4 +1,4 @@
-//! Redis 프로토콜 프레임을 표현하는 타입과 바이트 배열로부터 프레임을 파싱하기 위한 유틸리치를 제공한다.
+//! Redis 프로토콜 프레임을 표현하는 타입과, 바이트 배열로부터 프레임을 파싱하기 위한 유틸리티를 제공한다.
 
 // Redis 프로토콜의 프레임.
 pub enum Frame {
@@ -128,7 +128,7 @@ impl Frame {
                     let len = get_decimal(src)?.try_into()?;
                     let n = len + 2;
 
-                    if src.remainig() < n {
+                    if src.remaining() < n {
                         return Err(Error::Incomplete);
                     }
 
