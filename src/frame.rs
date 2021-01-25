@@ -214,7 +214,7 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
 }
 
 fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), Error> {
-    if src.remainig() < n {
+    if src.remaining() < n {
         return Err(Error::Incomplete)
     }
 
