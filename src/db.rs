@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 /**
- * 모든 커넥션이 공유하는 서버 상태.
+ * 모든 커넥션이 공유하는 서버 상태
  *
  * 'Db'는 키/값 데이터와, 활동중인 pub/sub 체널에 대한 모든 'broadcast::Sender' 값들을 'HashMap'에 저장한다.
  *
@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex};
  */
 pub(crate) struct Db {
      /**
-      * 공유 상태의 핸들. 백그라운드 작업 또한 'Arc<Shared>'를 갖는다.
+      * 공유 상태의 핸들.
+      * 백그라운드 작업 또한 'Arc<Shared>'를 갖는다.
       */
     shared: Arc<Shared>,
 }
@@ -42,7 +43,8 @@ struct Shared {
 
 struct State {
     /**
-     * key-value 데이터. 값을 저장할 뿐이기에, std HashMap으로 충분하다.
+     * key-value 데이터
+     * 값을 저장할 뿐이기에, std HashMap으로 충분하다.
      */
     entries: HashMap<String, Entry>,
 
@@ -65,7 +67,8 @@ struct State {
     expirations: BTreeMap<(Instant, u64), String>,
 
     /**
-     * 다음 만료를 위한 식별자. 각 만료는 유니크 식별자와 연결되어 있다.
+     * 다음 만료를 위한 식별자
+     * 각 만료는 유니크 식별자와 연결되어 있다.
      * 여기서의 '식별자'는 위에서 언급된 '식별자'와 같은 것을 칭한다.
      */
     next_id: u64,
@@ -77,13 +80,13 @@ struct State {
     shutdown: bool,
 }
 
-// key-value 저장소에 저장될 항목.
+// key-value 저장소에 저장될 항목
 struct Entry {
-    // 항목을 찾기 위한 유니크한 값.
+    // 항목을 찾기 위한 유니크한 값
     id: u64,
-    // 저장되는 실제 데이터.
+    // 저장되는 실제 데이터
     data: Bytes,
-    // 항목이 만료되어 Db에서 삭제되어야 하는 시간.
+    // 항목이 만료되어 Db에서 삭제되어야 하는 시간
     expires_at: Option<Instant>,
 }
 
@@ -101,7 +104,7 @@ impl Db {
             background_task: Notify::new(),
         });
 
-        // 백그라운드 작업 시작.
+        // 백그라운드 작업 시작
         tokio::spawn(purge_expired_tasks(shared.clone()));
 
         Db {shared}
@@ -145,7 +148,7 @@ impl Db {
          */
         let mut notify = false;
         let expires_at = expire.map(|duration| {
-            // 새로운 값이 만료될 시간.
+            // 새로운 값이 만료될 시간
             let when = Instant::now() + duration;
 
             /**
@@ -337,7 +340,7 @@ impl State {
 }
 
 /**
- * 백그라운드 태스크의 실행 루틴.
+ * 백그라운드 태스크의 실행 루틴
  * 
  * 알림을 기다린다. 알림이 오면 공유 상태 핸들로부터 모든 만료 키를 퍼지한다.
  * 'shutdown'이 설정되면 태스크를 종료한다.

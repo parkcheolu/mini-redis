@@ -1,6 +1,6 @@
 //! Redis 프로토콜 프레임을 표현하는 타입과, 바이트 배열로부터 프레임을 파싱하기 위한 유틸리티를 제공한다.
 
-// Redis 프로토콜의 프레임.
+// Redis 프로토콜의 프레임
 pub enum Frame {
     Simple(String),
     Error(String),
@@ -202,7 +202,7 @@ fn peek_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
         return Err(Error::Incomplete);
     }
 
-    Ok(src.check()[0])
+    Ok(src.chunk()[0])
 }
 
 fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
