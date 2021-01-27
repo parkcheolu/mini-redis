@@ -63,7 +63,7 @@ impl Parse {
     pub(crate) fn next_string(&mut self) -> Result<String, ParseError> {
         match self.next()? {
             /**
-             * 'Simple', 'Bulk'는 문자열으로 표현될 수 있다. 문자열은 UTF-8으로 파싱된다.
+             * 'Simple', 'Bulk'는 문자열으로 표현될 수 있다. 문자열은 UTF-8으로 파싱한다.
              * 
              * 에러는 문자열으로 저장되기 때문에, 별도의 타입으로 간주한다.
              */
@@ -79,29 +79,83 @@ impl Parse {
         }
     }
 
+    /**
+    다음 앤트리를 raw 바이트로 반환한다.
+    
+    다음 앤트리가 raw 바이트로 표현될 수 없는 경우, 에러를 반환한다.
+     */
     pub(crate) fn next_bytes(&mut self) -> Result<Bytes, ParseError> {
+        /**
+        'Simple', 'Bulk'는 raw 바이트로 표현할 수 있다.
 
+        에러는 문자열로 저장되고 raw 바이트로 표현할 수 있지만, 별도의 타입으로 간주한다.
+        */
+        match self.next()? {
+            Frame::Simple(s) => Ok(Bytes::from(s.into_bytes())),
+            Frame::Bulk(data) => Ok(data),
+            frame => Err(format!(
+                "protocol error; expected simple frame or bulk frame, got {:?}",
+                frame
+            )
+            .into()),
+        }
     }
 
+    /**
+    다음 앤트리를 integer로 반환한다.
+
+    여기에는 'Simple', 'Bulk', 'Integer' 타입의 프레임을 포함한다.
+    'Simple', 'Bulk' 타입 프레임을 파싱한다.
+
+    다음 앤트리가 integer로 표현될 수 없는 경우, 에러를 반환한다.
+    */
     pub(crate) fn next_int(&mut self) -> Result<u64, ParseError> {
+        use atoi::atoi;
 
+        const MSG: &str = "protocol error; invalid number";
+
+        match self.next()? {
+            // integer 타입 프레임은 이미 integer로 저장되어 있다.
+            Frame::Integer(v) => Ok(v),
+            /*
+            Simple, Bulk 프레임은 반드시 integer로 파싱해야 한다.
+            파싱에 실패하면 에러를 반환한다.
+            */
+            Frame::Simple(data) => atoi::<u64>(data.as_bytes()).ok_ro_else(|| MSG.into()),
+            Frame::Bulk(data) => atoi::<u64>(data).ok_ro_else(|| MSG.into()),
+            frame => Err(format!("protocol error; expected int frame but got {:?}", frame).into()),
+        }
     }
 
+    // 배열에 다음 앤트리가 남아있지 않음을 보장한다.
     pub(crate) fn finish(&mut self) -> Result<(), ParseError> {
-
+        if self.parts.next().is_none() {
+            Ok(())
+        } else {
+            Err("protocol error; expected end of frame, but there was more".into())
+        }
     }
 }
 
 impl From<String> for ParseError {
-
+    fn from(src: String) -> ParseError {
+        ParseError::Other(src.into())
+    }
 }
 
 impl From<&str> for ParseError {
-
+    fn from(src: &str) -> ParseError {
+        src.to_string().into()
+    }
 }
 
 impl fmt::Display for ParseError {
-
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::EndOfStream => "protocol error; unexpected end of stream".fmt(f),
+            ParseError::Other(err) => err.fmt(f);
+        }
+    }
 }
 
 impl std::error::Error for ParseError {}
