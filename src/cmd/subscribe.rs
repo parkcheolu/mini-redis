@@ -90,7 +90,13 @@ impl Subscribe {
     }
 
     /**
+     * 'Subscribe' 커맨드를 특정 'Db' 인스턴스에 수행한다. 
      * 
+     * 이 함수는 구독의 진입점이며, 구독 대상 채널의 초기 목록을 포함한다.
+     * 이 함수 호출 이후에도 클라이언트로부터 'subscribe', 'unsubscribe' 커맨드를
+     * 수신할 수 있으며, 이에 따라서 구독 목록을 갱신한다.
+     * 
+     * [here]: https://redis.io/topics/pubsub
      */
     pub(crate) async fn apply(
         mut self,
@@ -99,9 +105,82 @@ impl Subscribe {
         shutdown: &mut Shutdown,
     ) -> crate::Result<()> {
         /**
+         * 독립적인 각 채널 구독은 'sync::broadcast' 채널을 사용하여 핸들링한다.
+         * 메시지들은 현재 채널을 구독 중인 모든 클라이언트에게 퍼지며 전송된다.
          * 
+         * 독립적인 하나의 클라이언트는 여러 개의 채널을 구독할 수 있고, 자신의 구독
+         * 목록에서 채널을 동적으로 추가하고 삭제할 수 있다. 이 기능을 위해, 'StreamMap'
+         * 을 사용하여 활성화된 구독을 추적한다. 메시지를 수신할 때와 같이, 'SteramMap'은
+         * 각 브로드캐스트 채널로부터의 메시지를 병합한다.
          */
         let mut subscriptions = StreamMap::new();
+
+        loop {
+            /**
+             * 'self.channels'를 사용하여 추가적인 구독 대상 채널을 추적한다.
+             * 'apply'를 실행하는 동안 새로운 'SUBSCRIBE' 커맨드를 수신하면 새 채널을
+             * 여기의 vec에 추가한다.
+             */
+            for channel_name in self.channels.drain(..) {
+                subscribe_to_channel(channel_name, &mut subscriptions, db, dst).await?;
+            }
+
+            /**
+             * 다음 중 하나를 기다린다.
+             * 
+             * - 구독 채널 중 하나에서 메시지를 수신
+             * - 클라이언트로부터 구독 혹은 구독 해지 커맨드를 수신
+             * - 서버 셧다운 시그널
+             */
+            select! {
+                Some((channel_name, msg)) = subscriptions.next() => {
+                    dst.write_frame(&make_message_frame(channel_name, msg)).await?;
+                }
+                res = dst.read_frame() => {
+                    let frame = match res? {
+                        Some(frame) => frame,
+                        none => return Ok(())
+                    };
+
+                    handle_command(
+                        frame,
+                        &mut self.channels,
+                        &mut subscriptions,
+                        dst,
+                    ).await?;
+                }
+                _ = shutdown.recv() => {
+                    return Ok(());
+                }
+            };
+        }
     }
+
+    /**
+     * 커맨드를 'Frame'으로 변환한다.
+     * 
+     * 이 함수는 'Subscribe' 커맨드를 인코딩하여 서버로 전송하는 시점에 호출된다.
+     */
+    pub(crate) fn into_frame(self) -> Frame {
+        let mut frame = Frame::array();
+        frame.push_bulk(Bytes::from("subscribe".as_bytes()));
+        for channel in self.channels {
+            frame.push_bulk(Bytes::from(channel.into_bytes()));
+        }
+        frame
+    }
+}
+
+async fn subscribe_to_channel(
+    channel_name: String,
+    subscriptions: &mut StreamMap<String, Messages>,
+    db: &Db,
+    dst: &mut Connection,
+) -> crate::Result<()> {
+    let mut rx = db.subscribe(channel_name.clone());
+
+    let rx = Box::pin(async_stream::stream! {
+        
+    });
 }
 
