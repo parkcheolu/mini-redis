@@ -6,7 +6,7 @@ use bytes::Bytes;
  * 커맨드 파싱 유틸리티
  * 
  * 커맨드는 프레임의 배열로 표현된다. 프레임의 각 앤트리는 "token"이다.
- * 'Parse'는 프레임 배열으로 초기화되고, 커서와 유사한 API를 제공한다.
+ * 'Parse'는 프레임 배열으로 초기화되고, 커서 방식의 API를 제공한다.
  * 각 커맨드 struct는 'parse_frames' 메서드를 가지는데, 이 메서드는 'Parse'를 사용하여
  * 커맨드 자신의 필드를 추출한다.
  */
@@ -153,7 +153,7 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParseError::EndOfStream => "protocol error; unexpected end of stream".fmt(f),
-            ParseError::Other(err) => err.fmt(f);
+            ParseError::Other(err) => err.fmt(f),
         }
     }
 }

@@ -161,7 +161,8 @@ impl Subscribe {
     /**
      * 커맨드를 'Frame'으로 변환한다.
      * 
-     * 이 함수는 'Subscribe' 커맨드를 인코딩하여 서버로 전송하는 시점에 호출된다.
+     * 이 함수는 'Subscribe' 커맨드를 인코딩하여 서버로 전송하는 시점에 클라이언트로부터 
+     * 호출된다.
      */
     pub(crate) fn into_frame(self) -> Frame {
         let mut frame = Frame::array();
@@ -279,9 +280,81 @@ fn make_unsubscribe_frame(channel_name: String, num_subs: usize) -> Frame {
 
 // 클라이언트에게, 구독 중인 채널에서 메시지가 수신되었음을 알리는 메시지를 생성한다.
 fn make_message_frame(channel_name: String, msg: Bytes) -> Frame {
-    
+    let mut response = Frame::array();
+    response.push_bulk(Bytes::from_static(b"message"));
+    response.push_bulk(Bytes::from(channel_name));
+    response.push_bulk(msg);
+    response
 }
 
+impl Unsubscribe {
+    // 주어진 'channels'로 새로운 'Unsubscribe'를 생성한다.
+    pub(crate) fn new(channels: &[String]) -> Unsubscribe {
+        Unsubscribe {
+            channels: channels.to_vec(),
+        }
+    }
 
+    /**
+     * 수신한 프레임으로부터 'Unsubscribe' 인스턴스를 파싱한다.
+     * 
+     * 'Parse' 아규먼트는 'Frame'의 필드를 읽기 위한 커서 방식의 API를 제공한다.
+     * 이 함수의 호출 시점에는 프레임은 소켓으로부터 수신한 하나의 완전한 프레임이다.
+     * 
+     * 'UNSUBSCRIBE' 문자열은 이미 소비되었다.
+     * 
+     * # Returns
+     * 
+     * 성공의 경우 'Unsubscribe' 값을 반환한다. 프레임의 형태가 잘못된 경우 'Err'을 반환한다.
+     * 
+     * # Format
+     * 
+     * 세 앤트리를 포함하는 배열 프레임이 되어야 한다.
+     * 
+     * ```text
+     * UNSUBSCRIBE [channel [channel ...]]
+     * ```
+     */
+    pub(crate) fn parse_frames(parse: &mut Parse) -> Result<Unsubscribe, ParseError> {
+        use ParseError::EndOfStream;
 
+        // 채널 목록이 비어있을 수 있기에, 빈 vec로 시작한다.
+        let mut channels = vec![];
 
+        /**
+         * 프레임의 각 앤트리는 반드시 문자열이여야 하며, 그렇지 않으면 잘못된 프레임이다.
+         * 프레임 안의 모든 값이 소비되면, 커맨드 파싱이 완료된 것이다.
+         */
+        loop {
+            match parse.next_string() {
+                /**
+                 * 문자열은 'parse'로부터 소비되어 구독 해지 채널 목록에 들어간다.
+                 */
+                Ok(s) => channels.push(s),
+                // 'EndOfStream' 에러는 더이상 파싱할 데이터가 없음을 나타낸다.
+                Err(EndOfStream) => break,
+                // 다른 모든 에러는 결과적으로 커넥션을 중단한다.
+                Err(err) => return Err(err),
+            }
+        }
+
+        Ok(Unsubscribe { channels })
+    }
+
+    /**
+     * 커맨드를 'Frame'으로 변환한다.
+     * 
+     * 이 함수는 'Unsubscribe' 커맨드를 인코딩하여 서버로 전송하는 시점에 클라이언트로부터
+     * 호출된다.
+     */
+    pub(crate) fn into_frame(self) -> Frame {
+        let mut frame = Frame::array();
+        frame.push_bulk(Bytes::from("unsubscribe".as_bytes()));
+
+        for channel in self.channels {
+            from.push_bulk(Bytes::from(channel.into_bytes()));
+        }
+
+        frame
+    }
+}
