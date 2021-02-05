@@ -424,12 +424,70 @@ impl Subscriber {
         }
     }
 
+    // 채널 목록을 구독한다.
     pub async fn subscribe(&mut self, channels: &[String]) -> crate::Result<()> {
+        // 구독 커맨드를 수행한다.
+        self.client.subscribe_cmd(channels).await?;
 
+        // 구독 채널 목록을 갱신한다.
+        self.subscribed_channels
+            .extend(channels.iter().map(Clone::clone));
+        
+        Ok(())
     }
 
+    // 채널 목록으로 구독을 해지한다.
     pub async fn unsubscribe(&mut self, channels: &[String]) -> crate::Result<()> {
+        let frame = Unsubscribe::new(&channels).into_frame();
 
+        debug!(request = ?frame);
+
+        // 프레임을 소켓에 쓴다.
+        self.client.connection.write_frame(&frame).await?;
+
+        /**
+         * 인풋 채널 목록이 비어있다면 서버는 모든 구독 채널로부터의 구독을 해지한다.
+         * 때문에 수신한 해지 목록과 클라이언트의 구독 채널 목록을 비교한다.
+         */
+        let num = if channels.is_empty() {
+            self.subscribed_channels.len()
+        } else {
+            channels.len()
+        };
+
+        // 응답을 읽는다.
+        for _ in 0..num {
+            let response = self.client.read_response().await?;
+
+            match response {
+                Frame::Array(ref frame) => match frame.as_slice() {
+                    [unsubscribe, channel, ..] if *unsubscribe == "unsubscribe" => {
+                        let len = self.subscribed_channels.len();
+
+                        if len == 0 {
+                            // 최소 1개의 채널이 있어야 한다.
+                            return Err(response.to_error());
+                        }
+
+                        /**
+                         * 이 시점에는 해지된 채널이 아직 구독 목록에 남아있다.
+                         * 해지된 채널을 목록에서 제거한다.
+                         */
+                        self.subscribed_channels.retain(|c| *channel != &c[..]);
+
+                        /**
+                         * 구독 채널 목록에서 삭제된 채널은 단 하나여야 한다.
+                         */
+                        if self.subscribed_channels.len() != len - 1 {
+                            return Err(response.to_error());
+                        }
+                    }
+                    _ => return Err(response.to_error()),
+                },
+                frame => return Err(response.to_error()),
+            };
+        }
+
+        Ok(())
     }
-
 }
