@@ -1,13 +1,13 @@
-//! Redis 프로토콜 프레임을 표현하는 타입과, 바이트 배열로부터 프레임을 파싱하기 위한 유틸리티를 제공한다.
+///! Redis 프로토콜 프레임을 표현하는 타입과, 바이트 배열로부터 프레임을 파싱하기 위한 유틸리티를 제공한다.
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Cursor;
 use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
 
-// Redis 프로토콜의 프레임
+/// Redis 프로토콜의 프레임
 #[derive(Debug, Clone)]
 pub enum Frame {
     Simple(String),
@@ -17,27 +17,25 @@ pub enum Frame {
     Null,
     Array(Vec<Frame>),
 }
-
+#[derive(Debug)]
 pub enum Error {
-    // 메시지 파싱을 위한 데이터가 부족함을 의미한다.
+    /// 메시지 파싱을 위한 데이터가 부족함을 의미한다.
     Incomplete,
-    // 유효하지 않은 메시지 인코딩을 의미한다.
+    /// 유효하지 않은 메시지 인코딩을 의미한다.
     Other(crate::Error),
 }
 
 impl Frame {
-    // 빈 배열 프레임을 반환한다.
+    /// 빈 배열 프레임을 반환한다.
     pub(crate) fn array() -> Frame {
         Frame::Array(vec![])
     }
 
-    /**
-     * "bulk" 프레임을 배열에 넣는다. 'self'는 반드시 배열 프레임이어야 한다.
-     * 
-     * # Panics
-     * 
-     * 'self'가 배열이 아닌 경우 패닉.
-     */
+    /// "bulk" 프레임을 배열에 넣는다. 'self'는 반드시 배열 프레임이어야 한다.
+    /// 
+    /// # Panics
+    /// 
+    /// 'self'가 배열이 아닌 경우 패닉.
     pub(crate) fn push_bulk(&mut self, bytes: Bytes) {
         match self {
             Frame::Array(vec) => {
@@ -47,13 +45,11 @@ impl Frame {
         }
     }
 
-    /**
-     * "integer" 프레임을 배열에 넣는다. 'self'는 반드시 배열 프레임이어야 한다.
-     * 
-     * # Panics
-     * 
-     * 'self'가 배열이 아닌 경우 패닉.
-     */    
+    /// "integer" 프레임을 배열에 넣는다. 'self'는 반드시 배열 프레임이어야 한다.
+    /// 
+    /// # Panics
+    /// 
+    /// 'self'가 배열이 아닌 경우 패닉.
     pub(crate) fn push_int(&mut self, value: u64) {
         match self {
             Frame::Array(vec) => {
@@ -63,7 +59,7 @@ impl Frame {
         }
     }
 
-    // 'src'로부터의 전체 메시지가 디코딩될 수 있는지 확인한다.
+    /// 'src'로부터의 전체 메시지가 디코딩될 수 있는지 확인한다.
     pub fn check(src: &mut Cursor<&[u8]>) -> Result<(), Error> {
         match get_u8(src)? {
             b'+' => {
@@ -102,7 +98,7 @@ impl Frame {
         }
     }
 
-    // 메시지는 'check'를 통해 이미 검증되었다.
+    /// 메시지는 'check'를 통해 이미 검증되었다.
     pub fn parse(src: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
         match get_u8(src)? {
             b'+' => {
@@ -162,7 +158,7 @@ impl Frame {
         }
     }
 
-    // 프레임을 "unexpected frame" 에러 프레임으로 변환한다.
+    /// 프레임을 "unexpected frame" 에러 프레임으로 변환한다.
     pub(crate) fn to_error(&self) -> crate::Error {
         format!("unexpected frame: {}", self).into()
     }
@@ -231,7 +227,7 @@ fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), Error> {
 }
 
 
-// 십진수로 끝나는 새로운 라인을 읽는다.
+/// 십진수로 끝나는 새로운 라인을 읽는다.
 fn get_decimal(src: &mut Cursor<&[u8]>) -> Result<u64, Error> {
     use atoi::atoi;
 
@@ -240,7 +236,7 @@ fn get_decimal(src: &mut Cursor<&[u8]>) -> Result<u64, Error> {
     atoi::<u64>(line).ok_or_else(|| "protocol error; invalid frame format".into())
 }
 
-// 라인을 찾는다.
+/// 라인을 찾는다.
 fn get_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
     // 바이트를 직접 스캔한다.
     let start = src.position() as usize;
@@ -284,5 +280,13 @@ impl From<TryFromIntError> for Error {
     }
 }
 
+impl std::error::Error for Error {}
 
-
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Incomplete => "stream ended early".fmt(fmt),
+            Error::Other(err) => err.fmt(fmt),
+        }
+    }
+}

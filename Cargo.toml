@@ -25,4 +25,4 @@ tracing = "0.1.13"
 
 [dev-dependencies]
 # Enable test-utilities in dev mode only. This is mostly for tests.
-#tokio = { version = "1", features = ["test-util"] }
+tokio = { version = "1", features = ["test-util"] }
