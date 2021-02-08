@@ -1,11 +1,15 @@
 use crate::{Connection, Db, Frame, Parse};
 
+use bytes::Bytes;
+use tracing::{debug, instrument};
+
 /**
  * 키의 값을 가져온다.
  * 
  * 키가 존재하지 않을 경우, 특별한 값인 nil을 반환한다.
  * 키에 해당하는 값이 문자열이 하닌 경우 에러를 반환한다. GET은 문자열 값만을 다루기 때문이다.
  */
+#[derive(Debug)]
 pub struct Get {
     key: String,
 }

@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
  * 'Db' 값이 하나 생성되면 백그라운드 작업 하나가 시작된다. 이 작업은 요청된 만료 시간이 도래했을 때 값을 expiring 한다.
  * 작업은 모든 'Db' 인스턴스의 dropped 까지 계속된다.
  */
+#[derive(Clone)]
 pub(crate) struct Db {
      /**
       * 공유 상태의 핸들.
@@ -176,7 +177,7 @@ impl Db {
         );
 
         // 이 키로 저장된 기존 항목에 만료 시간이 있을 경우, 이 만료 정보는 삭제되어야 한다.
-        if let some(prev) = prev {
+        if let Some(prev) = prev {
             if let Some(when) = prev.expires_at {
                 state.expirations.remove(&(when, prev.id));
             }

@@ -1,4 +1,15 @@
 
+use crate::cmd::{Get, Publish, Set, Subscribe, Unsubscribe};
+use crate::{Connection, Frame};
+
+use async_stream::try_stream;
+use std::io::{Error, ErrorKind};
+use bytes::Bytes;
+use tokio::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
+use tokio_stream::Stream;
+use tracing::{debug, instrument};
+
 /**
 Redis 서버와 커넥션을 수립한다.
 
@@ -262,7 +273,7 @@ impl Client {
      * }
      * ```
      */
-    pub async fn publish(&mut self, channel: &str, message: Bytes) -> crate::Result<()> {
+    pub async fn publish(&mut self, channel: &str, message: Bytes) -> crate::Result<u64> {
         // 'Publish' 커맨드를 프레임으로 변환한다.
         let frame = Publish::new(channel, message).into_frame();
 
@@ -287,7 +298,7 @@ impl Client {
      * 'Subscriber' 값을 사용하여 메시지를 수신하고 클라이언트가 구독 중인 채널 목록을
      * 관리한다.
      */
-    pub async fn subscribe(mut self, channels: Vec<String>) -> crate::Result<()> {
+    pub async fn subscribe(mut self, channels: Vec<String>) -> crate::Result<Subscriber> {
         /**
          * 서버에 구독 커맨드를 수행하고 확인을 기다린다. 클라이언트는 "구독자" 상태로
          * 변하고, 이 시점부터 pub/sub 커맨드만 수행할 수 있다.

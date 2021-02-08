@@ -1,6 +1,7 @@
 use crate::Frame;
 
 use bytes::Bytes;
+use std::{fmt, str, vec};
 
 /**
  * 커맨드 파싱 유틸리티
@@ -121,8 +122,8 @@ impl Parse {
             Simple, Bulk 프레임은 반드시 integer로 파싱해야 한다.
             파싱에 실패하면 에러를 반환한다.
             */
-            Frame::Simple(data) => atoi::<u64>(data.as_bytes()).ok_ro_else(|| MSG.into()),
-            Frame::Bulk(data) => atoi::<u64>(data).ok_ro_else(|| MSG.into()),
+            Frame::Simple(data) => atoi::<u64>(data.as_bytes()).ok_or_else(|| MSG.into()),
+            Frame::Bulk(data) => atoi::<u64>(&data).ok_or_else(|| MSG.into()),
             frame => Err(format!("protocol error; expected int frame but got {:?}", frame).into()),
         }
     }

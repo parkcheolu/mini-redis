@@ -1,6 +1,14 @@
 //! Redis 프로토콜 프레임을 표현하는 타입과, 바이트 배열로부터 프레임을 파싱하기 위한 유틸리티를 제공한다.
 
+use bytes::Bytes;
+use std::convert::TryInto;
+use std::fmt;
+use std::io::Cursor;
+use std::num::TryFromIntError;
+use std::string::FromUtf8Error;
+
 // Redis 프로토콜의 프레임
+#[derive(Debug, Clone)]
 pub enum Frame {
     Simple(String),
     Error(String),
@@ -172,7 +180,7 @@ impl PartialEq<&str> for Frame {
 
 impl fmt::Display for Frame {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        use str::str;
+        use std::str;
 
         match self {
             Frame::Simple(response) => response.fmt(fmt),
@@ -237,7 +245,7 @@ fn get_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
     // 바이트를 직접 스캔한다.
     let start = src.position() as usize;
     // 마지막 바이트까지 스캔한다.
-    let end - src.get_ref().len() - 1;
+    let end = src.get_ref().len() - 1;
 
     for i in start..end {
         if src.get_ref()[i] == b'\r' && src.get_ref()[i + 1] == b'\n' {

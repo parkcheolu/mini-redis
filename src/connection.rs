@@ -1,4 +1,9 @@
+use crate::frame::{self, Frame};
 
+use bytes::{Buf, BytesMut};
+use std::io::{self, Cursor};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::net::TcpStream;
 /**
  * 원격 피어로부터 'Frame' 값을 송신/수신한다.
  *
@@ -192,7 +197,7 @@ impl Connection {
             Frame::Simple(val) => {
                 self.stream.write_u8(b'+').await?;
                 self.stream.write_all(val.as_bytes()).await?;
-                self.steram.write_all(b"\r\n").await?;
+                self.stream.write_all(b"\r\n").await?;
             }
             Frame::Error(val) => {
                 self.stream.write_u8(b'-').await()?;
