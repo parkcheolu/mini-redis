@@ -4,18 +4,33 @@ use crate::{Connection, Db, Frame};
 use bytes::Bytes;
 use std::time::Duration;
 use tracing::{debug, instrument};
-
+/// 'key'와 'value'를 묶어 저장한다.
+/// 
+/// 'key'에 이미 연결된 값이 있다면 기존 값의 타입과 상관없이 값을 덮어쓴다.
+/// SET 연산이 성공하면 이전 값의 남은 만료 시간은 폐기된다.
+/// 
+/// # Options
+/// 
+/// 현재 다음의 옵션을 지원한다:
+/// 
+/// * EX 'seconds' -- 특정 만료 시간을 초 단위로 지정한다.
+/// * PX 'milliseconds' -- 특정 만료 시간을 밀리초 단위로 지정한다.
 #[derive(Debug)]
 pub struct Set {
+    /// 검색할 키
     key: String,
 
+    /// 저장할 값
     value: Bytes,
 
+    /// 만료 시간
     expire: Option<Duration>,
 }
 
 impl Set {
-
+    /// 새로운 'key'와 'value'를 저장하는 새로운 'Set' 커맨드를 생성한다.
+    /// 
+    /// 'expire'가 'Some'이면, 값은 지정된 시간 이후 만료되어야 한다.
     pub fn new(key: impl ToString, value: Bytes, expire: Option<Duration>) -> Set {
         Set {
             key: key.to_string(),
@@ -24,14 +39,17 @@ impl Set {
         }
     }
 
+    /// 키를 가져온다.
     pub fn key(&self) -> &str {
         &self.key
     }
 
+    /// 값을 가져온다.
     pub fn value(&self) -> &Bytes {
         &self.value
     }
 
+    /// 만료값을 가져온다.
     pub fn expire(&self) -> Option<Duration> {
         self.expire
     }
